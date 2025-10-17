@@ -1,0 +1,26 @@
+{
+  "name": "magflock/magmobo",
+  "description": "MagMoBo - MagFlock Motherboard Kernel (Community Edition)",
+  "type": "project",
+  "require": {
+    "php": ">=8.2",
+    "ext-pdo": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "MoBo\\": "mobo/",
+      "Components\\": "components/",
+      "Adapters\\": "adapters/",
+      "Bridge\\": "bridge/",
+      "CLI\\": "cli/"
+    }
+  },
+  "scripts": {
+    "post-install-cmd": [
+      "@php -r \"!is_dir('storage/logs') && mkdir('storage/logs', 0755, true);\"",
+      "@php -r \"!is_dir('storage/backups') && mkdir('storage/backups', 0755, true);\"",
+      "@php -r \"!is_dir('storage/cache') && mkdir('storage/cache', 0755, true);\"",
+      "@php -r \"!is_dir('storage/state') && mkdir('storage/state', 0755, true);\""
+    ]
+  }
+}

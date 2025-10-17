@@ -1,0 +1,22 @@
+{
+    "name": "magflock/mobomini",
+    "description": "MoBoMini - MagFlock Motherboard Kernel",
+    "type": "project",
+    "require": {
+        "php": ">=8.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "MoBo\\": "mobo/",
+            "Components\\": "components/"
+        }
+    },
+    "scripts": {
+        "post-install-cmd": [
+            "@php -r \"!is_dir('storage/logs') && mkdir('storage/logs', 0755, true);\"",
+            "@php -r \"!is_dir('storage/backups') && mkdir('storage/backups', 0755, true);\"",
+            "@php -r \"!is_dir('storage/cache') && mkdir('storage/cache', 0755, true);\"",
+            "@php -r \"!is_dir('storage/state') && mkdir('storage/state', 0755, true);\""
+        ]
+    }
+}

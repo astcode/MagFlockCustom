@@ -1,0 +1,46 @@
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    container_name: magdsdb-pg
+    environment:
+      POSTGRES_USER: magdsdb_admin
+      POSTGRES_PASSWORD: magdsdb_admin
+      POSTGRES_DB: magdsdb
+      TZ: America/New_York
+    ports:
+      - "5433:5432"
+    command: >
+      postgres
+      -c wal_level=logical
+      -c max_wal_senders=10
+      -c max_replication_slots=10
+      -c shared_preload_libraries=timescaledb,pg_stat_statements,pg_cron,pgaudit,auto_explain
+      -c cron.database_name=magdsdb
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.track_utility=on
+      -c auto_explain.log_min_duration=500ms
+      -c auto_explain.log_analyze=on
+      -c pgaudit.log=ddl,role,read,write
+      -c pgaudit.log_parameter=on
+      -c max_connections=300
+      -c statement_timeout=30s
+      -c timezone=America/New_York
+    volumes:
+      - magdsdb_pgdata:/var/lib/postgresql/data
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  magdsdb_pgdata:

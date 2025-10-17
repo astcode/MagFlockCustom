@@ -1,0 +1,32 @@
+services:
+  soketi:
+    image: quay.io/soketi/soketi:latest-16-alpine
+    container_name: magws-soketi
+    ports:
+      - "6001:6001"
+      - "9601:9601"
+    environment:
+      SOKETI_DEBUG: "1"
+      SOKETI_DEFAULT_APP_ID: "magui-local"
+      SOKETI_DEFAULT_APP_KEY: "localkey"
+      SOKETI_DEFAULT_APP_SECRET: "localsecret"
+      SOKETI_SERVER_PORT: "6001"
+      SOKETI_METRICS_SERVER_PORT: "9601"
+      SOKETI_ENABLE_METRICS: "1"
+      SOKETI_METRICS_ENABLED: "1"
+      METRICS_USERNAME: "admin"
+      METRICS_PASSWORD: "admin"
+      SOKETI_ENABLE_API: "1"
+      SOKETI_API_ALLOW_ORIGIN: "*"
+      SOKETI_ALLOWED_ORIGINS: "*"
+      SOKETI_EVENT_MAX_SIZE_IN_KB: "1024"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: magws-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped

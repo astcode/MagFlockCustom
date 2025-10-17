@@ -1,0 +1,38 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Database files (if using local database files)
+*.sqlite
+*.db
+
+# Composer
+/vendor/
+
+# Node.js
+node_modules/
+
+# Build artifacts
+dist/
+build/
+
+# Other common sensitive files
+*.key
+*.pem
+.htaccess
+config/database.php
