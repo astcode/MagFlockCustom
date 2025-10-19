@@ -1,81 +1,16 @@
 <?php
 
-return [
-    'kernel' => [
-        'name' => 'MoBoMini',
-        'version' => '1.0.0',
-        'environment' => getenv('MOBO_ENV') ?: 'development'
-    ],
+declare(strict_types=1);
 
-    'logging' => [
-        'path' => __DIR__ . '/../storage/logs/mobo.log',
-        'level' => getenv('LOG_LEVEL') ?: 'debug'
-    ],
+use MoBo\Config\LayeredConfigLoader;
 
-    'database' => require __DIR__ . '/database.php',
+if (!class_exists(LayeredConfigLoader::class)) {
+    $autoload = dirname(__DIR__) . '/vendor/autoload.php';
+    if (file_exists($autoload)) {
+        require $autoload;
+    }
+}
 
-    'health' => [
-        'check_interval' => 30,
-        'timeout' => 5,
-        'retries' => 3,
-        'retry_delay' => 5,
-        'failure_threshold' => 2,
-        'recovery_threshold' => 2
-    ],
+$loader = new LayeredConfigLoader(__DIR__, getenv('MOBO_ENV') ?: 'development');
 
-    'recovery' => [
-        'max_restarts' => 3,
-        'restart_delay' => 10,
-        'backoff' => 'exponential' // or 'linear'
-    ],
-
-    'system' => [
-        'boot_time' => null,
-        'timezone' => 'UTC'
-    ],
-
-    'services' => [
-        'redis' => [
-            'host' => getenv('REDIS_HOST') ?: '127.0.0.1',
-            'port' => getenv('REDIS_PORT') ?: 6379,
-            'password' => getenv('REDIS_PASSWORD') ?: null
-        ],
-        'pusher' => [
-            'host' => getenv('PUSHER_HOST') ?: '127.0.0.1',
-            'port' => getenv('PUSHER_PORT') ?: 6001,
-            'scheme' => getenv('PUSHER_SCHEME') ?: 'http',
-            'app_id' => getenv('PUSHER_APP_ID') ?: 'magui-local',
-            'key' => getenv('PUSHER_APP_KEY') ?: 'localkey',
-            'secret' => getenv('PUSHER_APP_SECRET') ?: 'localsecret'
-        ]
-    ],
-
-    'urls' => [
-        'app' => getenv('APP_URL') ?: 'http://magflockcustom.test/magmobomini',
-        'mobo' => getenv('MOBO_URL') ?: 'http://magflockcustom.test/magmobomini'
-    ],
-
-    // Component loading order (dependencies first!)
-    'components' => [
-        'MagDB' => [
-            'class' => \Components\MagDB\MagDB::class,
-            'enabled' => true,
-            'config' => 'database', // ← USE EXISTING database config!
-        ],
-        'MagPuma' => [
-            'class' => \Components\MagPuma\MagPuma::class,
-            'enabled' => true,
-            'config' => null, // ← No separate config needed
-        ],
-        'MagGate' => [
-            'class' => \Components\MagGate\MagGate::class,
-            'enabled' => true,
-            'config' => null, // ← No separate config needed
-        ],
-        'MagView' => [
-            'class' => \Components\MagView\MagView::class,
-            'enabled' => true,
-            'config' => null, // ← No separate config needed
-        ],
-    ]
-];
+return $loader->load();

@@ -10,6 +10,7 @@ class BootManager
     private Registry $registry;
     private LifecycleManager $lifecycle;
     private StateManager $state;
+    private ?Telemetry $telemetry;
 
     public function __construct(
         ConfigManager $config,
@@ -17,7 +18,8 @@ class BootManager
         EventBus $eventBus,
         Registry $registry,
         LifecycleManager $lifecycle,
-        StateManager $state
+        StateManager $state,
+        ?Telemetry $telemetry = null
     ) {
         $this->config = $config;
         $this->logger = $logger;
@@ -25,49 +27,57 @@ class BootManager
         $this->registry = $registry;
         $this->lifecycle = $lifecycle;
         $this->state = $state;
+        $this->telemetry = $telemetry;
     }
 
     public function boot(): bool
     {
         try {
-            $this->logger->info("=== MoBoMini Boot Sequence Started ===", 'BOOT');
+            $this->logger->info("=== MoBoCE Boot Sequence Started ===", 'BOOT');
             $this->eventBus->emit('system.boot');
+            $this->telemetry?->increment('boot.sequence.start');
 
             // STAGE 1: PRE-BOOT
             $this->logger->info("[STAGE 1] PRE-BOOT", 'BOOT');
             if (!$this->preBoot()) {
                 throw new \RuntimeException("Pre-boot failed");
             }
+            $this->telemetry?->increment('boot.stage.pre_boot.success');
 
             // STAGE 2: KERNEL INIT
             $this->logger->info("[STAGE 2] KERNEL INIT", 'BOOT');
             if (!$this->kernelInit()) {
                 throw new \RuntimeException("Kernel initialization failed");
             }
+            $this->telemetry?->increment('boot.stage.kernel_init.success');
 
             // STAGE 3: POST (Power-On Self-Test)
             $this->logger->info("[STAGE 3] POST (Power-On Self-Test)", 'BOOT');
             if (!$this->post()) {
                 throw new \RuntimeException("POST failed");
             }
+            $this->telemetry?->increment('boot.stage.post.success');
 
             // STAGE 4: COMPONENT LOADING
             $this->logger->info("[STAGE 4] COMPONENT LOADING", 'BOOT');
             if (!$this->loadComponents()) {
                 throw new \RuntimeException("Component loading failed");
             }
+            $this->telemetry?->increment('boot.stage.component_load.success');
 
             // STAGE 5: SERVICE START
             $this->logger->info("[STAGE 5] SERVICE START", 'BOOT');
             if (!$this->startServices()) {
                 throw new \RuntimeException("Service start failed");
             }
+            $this->telemetry?->increment('boot.stage.service_start.success');
 
             // STAGE 6: READY
             $this->logger->info("[STAGE 6] SYSTEM READY", 'BOOT');
             $this->ready();
+            $this->telemetry?->increment('boot.sequence.ready');
 
-            $this->logger->info("=== MoBoMini Boot Complete ===", 'BOOT');
+            $this->logger->info("=== MoBoCE Boot Complete ===", 'BOOT');
 
             return true;
 
@@ -79,6 +89,7 @@ class BootManager
             $this->eventBus->emit('system.boot_failed', [
                 'error' => $e->getMessage()
             ]);
+            $this->telemetry?->increment('boot.sequence.failed');
 
             return false;
         }
@@ -209,6 +220,8 @@ class BootManager
         $this->state->setSystemState('running');
 
         $this->eventBus->emit('system.ready');
+        $this->telemetry?->markReady();
+        $this->telemetry?->increment('system.ready.total');
 
         $this->displayBootSummary();
     }
@@ -219,7 +232,7 @@ class BootManager
         
         echo "\n";
         echo "╔════════════════════════════════════════════════════════════╗\n";
-        echo "║              MoBoMini System Ready                         ║\n";
+        echo "║              MoBoCE System Ready                         ║\n";
         echo "╠════════════════════════════════════════════════════════════╣\n";
         echo "║ Components Loaded: " . str_pad(count($components), 37) . "║\n";
         

@@ -75,28 +75,29 @@ if (!function_exists('env')) {
 // Get kernel instance (singleton)
 $kernel = Kernel::getInstance();
 
-// Initialize with config
+// Initialize with layered config directory
 $kernel->initialize(__DIR__ . '/config/mobo.php');
 
-// Auto-register components from config
-$config = require __DIR__ . '/config/mobo.php';
+// Auto-register components from config manager
+$configManager = $kernel->getConfig();
+$components = $configManager->get('components', []);
+$databaseConfig = (array) $configManager->get('database', []);
 
-// Load database config SECOND
-$dbConfig = require __DIR__ . '/config/database.php';
-if (isset($config['components'])) {
-    foreach ($config['components'] as $name => $componentConfig) {
-        if ($componentConfig['enabled'] ?? true) {
-            $class = $componentConfig['class'];
-            if (class_exists($class)) {
-                $component = new $class();
-                $kernel->register($component);
-                
-                // Configure MagDB immediately after registration
-                if ($name === 'MagDB') {
-                    $component->configure($dbConfig);
-                }
-            }
-        }
+foreach ($components as $name => $componentConfig) {
+    if (!($componentConfig['enabled'] ?? true)) {
+        continue;
+    }
+
+    $class = $componentConfig['class'] ?? null;
+    if (!$class || !class_exists($class)) {
+        continue;
+    }
+
+    $component = new $class();
+    $kernel->register($component);
+
+    if ($name === 'MagDB' && !empty($databaseConfig)) {
+        $component->configure($databaseConfig);
     }
 }
 

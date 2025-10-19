@@ -1500,7 +1500,7 @@ Copy
 // MagBackup spawns background process
 $kernel->on('backup.start', function() {
     // Fork process or use job queue
-    exec('php mobo backup:run --background');
+    exec('php mag backup:run --background');
 });
 OR use your existing job queue system:
 

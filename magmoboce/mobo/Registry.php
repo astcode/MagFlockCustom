@@ -9,11 +9,13 @@ class Registry
     private array $components = [];
     private Logger $logger;
     private EventBus $eventBus;
+    private ?Telemetry $telemetry;
 
-    public function __construct(Logger $logger, EventBus $eventBus)
+    public function __construct(Logger $logger, EventBus $eventBus, ?Telemetry $telemetry = null)
     {
         $this->logger = $logger;
         $this->eventBus = $eventBus;
+        $this->telemetry = $telemetry;
     }
 
     public function register(ComponentInterface $component): void
@@ -91,6 +93,10 @@ class Registry
             'old_state' => $oldState,
             'new_state' => $state
         ]);
+        $this->telemetry?->incrementCounter('component.state_changes_total', 1, [
+            'component' => $name,
+            'state' => $state,
+        ]);
     }
 
     public function setHealth(string $name, string $health, array $details = []): void
@@ -165,6 +171,9 @@ class Registry
         }
 
         $this->components[$name]['restart_count']++;
+        $this->telemetry?->incrementCounter('component.restarts_total', 1, [
+            'component' => $name,
+        ]);
         return $this->components[$name]['restart_count'];
     }
 

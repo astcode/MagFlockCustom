@@ -22,7 +22,8 @@ Thumbs.db
 *.db
 
 # Composer
-/vendor/
+vendor/
+**/vendor/
 
 # Node.js
 node_modules/
@@ -30,6 +31,19 @@ node_modules/
 # Build artifacts
 dist/
 build/
+storage/
+**/storage/
+
+# PHP tooling caches
+.phpunit.result.cache
+**/.phpunit.result.cache
+
+# Project secrets (committed templates should live elsewhere)
+magmoboce/config/secrets/
+
+# Local runtime state
+magmoboce/storage/
+magmoboce/vendor/
 
 # Other common sensitive files
 *.key

@@ -2,19 +2,36 @@
 
 namespace MoBo;
 
+use MoBo\Security\AuditWriter;
+use MoBo\Security\CapabilityDeniedException;
+use MoBo\Security\CapabilityGate;
+
 class LifecycleManager
 {
     private Registry $registry;
     private Logger $logger;
     private EventBus $eventBus;
     private ConfigManager $config;
+    private ?Telemetry $telemetry;
+    private CapabilityGate $capabilityGate;
+    private AuditWriter $auditWriter;
 
-    public function __construct(Registry $registry, Logger $logger, EventBus $eventBus, ConfigManager $config)
-    {
+    public function __construct(
+        Registry $registry,
+        Logger $logger,
+        EventBus $eventBus,
+        ConfigManager $config,
+        ?Telemetry $telemetry,
+        CapabilityGate $capabilityGate,
+        AuditWriter $auditWriter
+    ) {
         $this->registry = $registry;
         $this->logger = $logger;
         $this->eventBus = $eventBus;
         $this->config = $config;
+        $this->telemetry = $telemetry;
+        $this->capabilityGate = $capabilityGate;
+        $this->auditWriter = $auditWriter;
     }
 
     public function start(string $name): bool
@@ -33,6 +50,20 @@ class LifecycleManager
             return true;
         }
 
+        $actor = $this->getDefaultActor();
+        $context = ['component' => $name];
+
+        try {
+            $this->capabilityGate->assertAllowed('kernel.component.start', $actor, $context);
+        } catch (CapabilityDeniedException $exception) {
+            $this->logger->error("Capability denied when starting component: {$name}", 'SECURITY', [
+                'capability' => $exception->getCapability(),
+                'actor' => $exception->getActor(),
+                'context' => $exception->getContext(),
+            ]);
+            return false;
+        }
+
         try {
             $this->logger->info("Starting component: {$name}", 'LIFECYCLE');
             $this->registry->setState($name, 'starting');
@@ -43,8 +74,14 @@ class LifecycleManager
             $this->registry->resetRestartCount($name);
 
             $this->eventBus->emit('component.started', ['name' => $name]);
+            $this->telemetry?->increment('components.started.total');
+            $this->telemetry?->increment("components.started.{$name}");
 
             $this->logger->info("Component started: {$name}", 'LIFECYCLE');
+            $this->auditWriter->write('kernel.component.start', [
+                'component' => $name,
+                'result' => 'success',
+            ]);
 
             return true;
 
@@ -58,6 +95,13 @@ class LifecycleManager
             $this->eventBus->emit('component.failed', [
                 'name' => $name,
                 'error' => $e->getMessage()
+            ]);
+            $this->telemetry?->increment('components.failed.total');
+            $this->telemetry?->increment("components.failed.{$name}");
+
+            $this->auditWriter->write('kernel.component.fail', [
+                'component' => $name,
+                'error' => $e->getMessage(),
             ]);
 
             return false;
@@ -80,6 +124,20 @@ class LifecycleManager
             return true;
         }
 
+        $actor = $this->getDefaultActor();
+        $context = ['component' => $name];
+
+        try {
+            $this->capabilityGate->assertAllowed('kernel.component.stop', $actor, $context);
+        } catch (CapabilityDeniedException $exception) {
+            $this->logger->error("Capability denied when stopping component: {$name}", 'SECURITY', [
+                'capability' => $exception->getCapability(),
+                'actor' => $exception->getActor(),
+                'context' => $exception->getContext(),
+            ]);
+            return false;
+        }
+
         try {
             $this->logger->info("Stopping component: {$name}", 'LIFECYCLE');
             $this->registry->setState($name, 'stopping');
@@ -89,14 +147,26 @@ class LifecycleManager
             $this->registry->setState($name, 'stopped');
 
             $this->eventBus->emit('component.stopped', ['name' => $name]);
+            $this->telemetry?->increment('components.stopped.total');
+            $this->telemetry?->increment("components.stopped.{$name}");
 
             $this->logger->info("Component stopped: {$name}", 'LIFECYCLE');
+            $this->auditWriter->write('kernel.component.stop', [
+                'component' => $name,
+                'result' => 'success',
+            ]);
 
             return true;
 
         } catch (\Throwable $e) {
             $this->logger->error("Failed to stop component: {$name}", 'LIFECYCLE', [
                 'error' => $e->getMessage()
+            ]);
+
+            $this->auditWriter->write('kernel.component.fail', [
+                'component' => $name,
+                'error' => $e->getMessage(),
+                'operation' => 'stop',
             ]);
 
             return false;
@@ -228,5 +298,11 @@ class LifecycleManager
         $this->stopAll();
 
         $this->logger->info("Shutdown complete", 'LIFECYCLE');
+        $this->telemetry?->increment('system.shutdown.total');
+    }
+
+    private function getDefaultActor(): string
+    {
+        return (string) $this->config->get('security.default_actor', 'system');
     }
 }

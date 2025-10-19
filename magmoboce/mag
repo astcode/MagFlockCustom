@@ -1,0 +1,42 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use MoBo\CLI\Application;
+use MoBo\CLI\Commands\MagDSFailoverCommand;
+use MoBo\CLI\Commands\MagDSReplicaRegisterCommand;
+use MoBo\CLI\Commands\MagDSReplicaStatusCommand;
+use MoBo\CLI\Commands\MagDSReplicaUnregisterCommand;
+use MoBo\CLI\Commands\MigrateBaselineCommand;
+use MoBo\CLI\Commands\MigrateDownCommand;
+use MoBo\CLI\Commands\MigrateStatusCommand;
+use MoBo\CLI\Commands\MigrateUpCommand;
+use MoBo\Kernel;
+
+$projectRoot = __DIR__;
+$bootstrap = $projectRoot . '/bootstrap.php';
+
+if (!file_exists($bootstrap)) {
+    fwrite(STDERR, "[mag] Bootstrap file not found at {$bootstrap}\n");
+    exit(1);
+}
+
+/** @var Kernel $kernel */
+$kernel = require $bootstrap;
+
+if (!$kernel->isBooted()) {
+    $kernel->boot();
+}
+
+$app = new Application();
+$app->register(new MigrateStatusCommand($kernel, $projectRoot));
+$app->register(new MigrateUpCommand($kernel, $projectRoot));
+$app->register(new MigrateDownCommand($kernel, $projectRoot));
+$app->register(new MigrateBaselineCommand($kernel, $projectRoot));
+$app->register(new MagDSReplicaStatusCommand());
+$app->register(new MagDSReplicaRegisterCommand());
+$app->register(new MagDSReplicaUnregisterCommand());
+$app->register(new MagDSFailoverCommand());
+
+exit($app->run($argv));

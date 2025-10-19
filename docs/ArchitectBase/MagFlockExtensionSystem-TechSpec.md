@@ -111,6 +111,20 @@ Extension → Extension Kernel → Component Adapter → MagMoBo Component
 └─────────────────────┼─────────────┼─────────────────────────────────┘
                       │             │
                       ▼             ▼
+│         ┌──────────────────────────────────────────┐               │
+│         │       Protection Layer                    │               │
+│         │  ┌──────────────────┐  ┌──────────────────┐          │               │
+│         │  │  MagPuma         │  │   MagSentinal   │          │               │
+│         │  │  (he intelligent gatekeeper      │  │  Full Mesh Gatekeeper      │          │               │
+│         │  │   deployment patterns,
+                  privacy/compliance
+                  testing/validation
+                  .......
+                        │  │(Capability)      │          │               │
+│         └──────────────────────────────────────────┘               │
+
+
+
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         DATA PLANE                                  │
 │                        MagMoBo Core                                 │

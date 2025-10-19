@@ -9,13 +9,21 @@ class HealthMonitor
     private EventBus $eventBus;
     private ConfigManager $config;
     private array $healthHistory = [];
+    private ?Telemetry $telemetry;
 
-    public function __construct(Registry $registry, Logger $logger, EventBus $eventBus, ConfigManager $config)
+    public function __construct(
+        Registry $registry,
+        Logger $logger,
+        EventBus $eventBus,
+        ConfigManager $config,
+        ?Telemetry $telemetry = null
+    )
     {
         $this->registry = $registry;
         $this->logger = $logger;
         $this->eventBus = $eventBus;
         $this->config = $config;
+        $this->telemetry = $telemetry;
     }
 
     public function checkAll(): array
@@ -117,6 +125,8 @@ class HealthMonitor
 
     private function checkSystem(): array
     {
+        $load = function_exists('sys_getloadavg') ? sys_getloadavg() : [0, 0, 0];
+
         return [
             'status' => 'healthy',
             'uptime' => $this->getUptime(),
@@ -125,7 +135,7 @@ class HealthMonitor
                 'peak' => memory_get_peak_usage(true),
                 'limit' => ini_get('memory_limit')
             ],
-            'load' => sys_getloadavg()
+            'load' => $load
         ];
     }
 
@@ -160,26 +170,28 @@ class HealthMonitor
         $consecutiveFailures = 0;
         $consecutiveSuccesses = 0;
 
+        $sawFailure = false;
+
         foreach (array_reverse($history) as $check) {
             if (in_array($check['status'], ['failed', 'critical'])) {
                 $consecutiveFailures++;
                 $consecutiveSuccesses = 0;
-            } else if ($check['status'] === 'healthy') {
+                $sawFailure = true;
+
+                if ($consecutiveFailures >= $failureThreshold) {
+                    return 'failed';
+                }
+            } elseif ($check['status'] === 'healthy') {
                 $consecutiveSuccesses++;
                 $consecutiveFailures = 0;
+
+                if ($consecutiveSuccesses >= $recoveryThreshold) {
+                    return 'healthy';
+                }
             }
         }
 
-        if ($consecutiveFailures >= $failureThreshold) {
-            return 'failed';
-        }
-
-        if ($consecutiveSuccesses >= $recoveryThreshold) {
-            return 'healthy';
-        }
-
-        // In between - degraded
-        if ($consecutiveFailures > 0) {
+        if ($sawFailure) {
             return 'degraded';
         }
 

@@ -10,10 +10,14 @@ class EventBus
     private Logger $logger;
     private array $eventHistory = [];
     private int $maxHistory = 100;
+    private ?Telemetry $telemetry;
+    private ?EventSchemaRegistry $schemaRegistry;
 
-    public function __construct(Logger $logger)
+    public function __construct(Logger $logger, ?Telemetry $telemetry = null, ?EventSchemaRegistry $schemaRegistry = null)
     {
         $this->logger = $logger;
+        $this->telemetry = $telemetry;
+        $this->schemaRegistry = $schemaRegistry;
     }
 
     public function on(string $event, callable $handler, int $priority = 50): string
@@ -58,22 +62,37 @@ class EventBus
 
     public function emit(string $event, array $data = [], int $timeout = 5000): void
     {
-        $this->logger->debug("Event emitted: {$event}", 'EVENTBUS', $data);
+        $timestamp = microtime(true);
+        $payload = $data + ['timestamp' => $timestamp];
+
+        if ($this->schemaRegistry) {
+            $missing = $this->schemaRegistry->validate($event, $payload);
+            if (!empty($missing)) {
+                $this->logger->warning("Event payload missing required fields", 'EVENTBUS', [
+                    'event' => $event,
+                    'missing' => $missing
+                ]);
+            }
+        }
+
+        $this->logger->debug("Event emitted: {$event}", 'EVENTBUS', $payload);
+        $this->telemetry?->incrementCounter('eventbus.events_total', 1, ['event' => $event]);
 
         // Add to history
-        $this->addToHistory($event, $data);
+        $this->addToHistory($event, $payload);
 
         if (!isset($this->handlers[$event])) {
             return;
         }
 
+        $emitStart = microtime(true);
         foreach ($this->handlers[$event] as $id => $handlerData) {
             $handler = $handlerData['handler'];
             
             try {
                 // Execute with timeout protection
                 $startTime = microtime(true);
-                $handler($data);
+                $handler($payload);
                 $duration = (microtime(true) - $startTime) * 1000;
 
                 if ($duration > $timeout) {
@@ -82,15 +101,21 @@ class EventBus
                         'duration' => $duration,
                         'timeout' => $timeout
                     ]);
+                    $this->telemetry?->increment('events.handler.timeout');
                 }
+
+                $this->telemetry?->observeHistogram('eventbus.handler_duration_ms', $duration, ['event' => $event]);
             } catch (\Throwable $e) {
                 $this->logger->error("Handler failed for event: {$event}", 'EVENTBUS', [
                     'id' => $id,
                     'error' => $e->getMessage(),
                     'trace' => $e->getTraceAsString()
                 ]);
+                $this->telemetry?->increment('events.handler.error');
             }
         }
+
+        $this->telemetry?->recordTiming("events.emit.{$event}", (microtime(true) - $emitStart) * 1000);
     }
 
     private function addToHistory(string $event, array $data): void
