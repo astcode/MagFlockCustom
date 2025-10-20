@@ -27,7 +27,8 @@
             "@php scripts/post-install.php"
         ],
         "kernel-smoke": "php bin/kernel-smoke.php",
-        "kernel-smoke-magds": "php bin/kernel-smoke-magds.php"
+        "kernel-smoke-magds": "php bin/kernel-smoke-magds.php",
+        "chaos-smoke": "php mag magds:chaos run --scenario=component.crash,config.invalid --report=auto"
     }
 }
 

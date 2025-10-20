@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 use MoBo\CLI\Application;
 use MoBo\CLI\Commands\MagDSBackupCommand;
+use MoBo\CLI\Commands\MagDSChaosCommand;
 use MoBo\CLI\Commands\MagDSFailoverCommand;
 use MoBo\CLI\Commands\MagDSReplicaRegisterCommand;
 use MoBo\CLI\Commands\MagDSReplicaStatusCommand;
@@ -42,5 +43,6 @@ $app->register(new MagDSReplicaUnregisterCommand());
 $app->register(new MagDSFailoverCommand());
 $app->register(new MagDSBackupCommand());
 $app->register(new MagDSRestoreCommand());
+$app->register(new MagDSChaosCommand());
 
 exit($app->run($argv));

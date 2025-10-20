@@ -92,6 +92,13 @@ final class Telemetry
         $this->defineGauge('magdb.last_backup_epoch', 'Unix timestamp of the last successful MagDB backup.', []);
         $this->defineCounter('magdb.restores_total', 'MagDB restore operations executed.', []);
         $this->defineGauge('magdb.last_restore_epoch', 'Unix timestamp of the last MagDB restore.', []);
+        $this->defineCounter('chaos.scenarios_total', 'Chaos scenario executions grouped by result.', ['scenario', 'result']);
+        $this->defineHistogram(
+            'chaos.scenario_duration_ms',
+            'Chaos scenario execution durations in milliseconds.',
+            ['scenario'],
+            $this->defaultBuckets()
+        );
         $this->defineCounter(
             'config.reload_attempts_total',
             'Configuration reload attempts partitioned by result.',

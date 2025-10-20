@@ -241,6 +241,19 @@ class Kernel
         }
     }
 
+    private function applyLoggerContext(): void
+    {
+        if (!isset($this->logger) || !isset($this->config)) {
+            return;
+        }
+
+        $this->logger->setContext([
+            'instance_id' => $this->instanceId,
+            'environment' => (string) $this->config->get('kernel.environment', 'development'),
+            'version' => (string) $this->config->get('kernel.version', '1.0.0'),
+        ]);
+    }
+
     public function register(ComponentInterface $component): void
     {
         $this->registry->register($component);
@@ -285,6 +298,11 @@ class Kernel
         self::$instance = null;
     }
 
+    public function getInstanceId(): string
+    {
+        return $this->instanceId;
+    }
+
     public function getConfig(): ConfigManager
     {
         return $this->config;
@@ -293,6 +311,11 @@ class Kernel
     public function getLogger(): Logger
     {
         return $this->logger;
+    }
+
+    public function getConfigLoader(): ?LayeredConfigLoader
+    {
+        return $this->configLoader;
     }
 
     public function getEventBus(): EventBus
@@ -352,20 +375,12 @@ class Kernel
 
     public function getVersion(): string
     {
-        return $this->config->get('kernel.version', '1.0.0');
+        return (string) $this->config->get('kernel.version', $this->version);
     }
 
     public function getName(): string
     {
-        return $this->config->get('kernel.name', 'MoBoCE');
-    }
-
-    private function applyLoggerContext(): void
-    {
-        $this->logger->setContext([
-            'instance_id' => $this->instanceId,
-            'environment' => $this->config->get('kernel.environment', 'unknown'),
-        ]);
+        return (string) $this->config->get('kernel.name', $this->name);
     }
 
     private function startMetricsServer(): void
@@ -383,3 +398,4 @@ class Kernel
         }
     }
 }
+

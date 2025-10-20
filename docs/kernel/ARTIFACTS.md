@@ -37,9 +37,12 @@ magmoboce/docs/
     Runbook_AuditLogging.md
     Runbook_IncidentResponse.md
     Runbook_Failover.md
+    Runbook_ChaosTesting.md
     Runbook_BackupRestore.md
+    PerfReports/
     Runbook_Migrations.md
     Alerts.md
+    ChaosReports/
 
 migrations/
   README.md

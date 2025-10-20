@@ -49,6 +49,11 @@ final class LayeredConfigLoader
         return $this->environment;
     }
 
+    public function getConfigRoot(): string
+    {
+        return $this->configPath;
+    }
+
     /**
      * Compute the set of changed keys between two configuration arrays.
      *
