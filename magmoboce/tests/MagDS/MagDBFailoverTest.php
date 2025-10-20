@@ -78,16 +78,23 @@ final class MagDBFailoverTest extends TestCase
         $primary = array_values(array_filter($status, static fn (array $row): bool => $row['role'] === 'primary-configured'))[0] ?? null;
         self::assertNotNull($primary);
         self::assertFalse($primary['healthy'], 'Primary should be marked unhealthy in test fixture.');
+        self::assertTrue($primary['quarantined']);
+        self::assertTrue($primary['fenced']);
+        self::assertNotNull($primary['last_heartbeat_at']);
 
         $active = array_values(array_filter($status, static fn (array $row): bool => $row['role'] === 'primary-active'))[0] ?? null;
         self::assertNotNull($active);
         self::assertTrue($active['healthy']);
         self::assertTrue($active['active']);
+        self::assertArrayHasKey('latency_ms', $active);
+        self::assertIsNumeric($active['latency_ms']);
+        self::assertNotNull($active['last_heartbeat_at']);
 
         $replica = array_values(array_filter($status, static fn (array $row): bool => $row['role'] === 'replica' && $row['name'] === 'magds_replica'))[0] ?? null;
         self::assertNotNull($replica);
         self::assertTrue($replica['healthy']);
         self::assertTrue($replica['active']);
+        self::assertIsNumeric($replica['score']);
     }
 }
 

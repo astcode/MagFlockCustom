@@ -4,10 +4,12 @@
 declare(strict_types=1);
 
 use MoBo\CLI\Application;
+use MoBo\CLI\Commands\MagDSBackupCommand;
 use MoBo\CLI\Commands\MagDSFailoverCommand;
 use MoBo\CLI\Commands\MagDSReplicaRegisterCommand;
 use MoBo\CLI\Commands\MagDSReplicaStatusCommand;
 use MoBo\CLI\Commands\MagDSReplicaUnregisterCommand;
+use MoBo\CLI\Commands\MagDSRestoreCommand;
 use MoBo\CLI\Commands\MigrateBaselineCommand;
 use MoBo\CLI\Commands\MigrateDownCommand;
 use MoBo\CLI\Commands\MigrateStatusCommand;
@@ -38,5 +40,7 @@ $app->register(new MagDSReplicaStatusCommand());
 $app->register(new MagDSReplicaRegisterCommand());
 $app->register(new MagDSReplicaUnregisterCommand());
 $app->register(new MagDSFailoverCommand());
+$app->register(new MagDSBackupCommand());
+$app->register(new MagDSRestoreCommand());
 
 exit($app->run($argv));

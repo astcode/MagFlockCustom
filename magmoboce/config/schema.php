@@ -111,6 +111,16 @@ return [
                     'quarantine_seconds' => ['type' => 'integer', 'required' => false],
                     'cooldown_seconds' => ['type' => 'integer', 'required' => false],
                     'preferred_tags' => ['type' => 'object', 'required' => false],
+                    'weights' => [
+                        'type' => 'object',
+                        'required' => false,
+                        'children' => [
+                            'lag_seconds' => ['type' => 'number', 'required' => false],
+                            'latency_ms' => ['type' => 'number', 'required' => false],
+                            'preferred_tag_bonus' => ['type' => 'number', 'required' => false],
+                            'fenced_penalty' => ['type' => 'number', 'required' => false],
+                        ],
+                    ],
                 ],
             ],
             'fencing' => [
@@ -127,6 +137,40 @@ return [
                 'children' => [
                     'read_timeout_seconds' => ['type' => 'integer', 'required' => false],
                     'write_timeout_seconds' => ['type' => 'integer', 'required' => false],
+                ],
+            ],
+            'backup' => [
+                'type' => 'object',
+                'required' => false,
+                'children' => [
+                    'enabled' => ['type' => 'boolean', 'required' => false],
+                    'path' => ['type' => 'string', 'required' => false],
+                    'datasets' => [
+                        'type' => 'array',
+                        'required' => false,
+                        'items' => [
+                            'type' => 'object',
+                            'children' => [
+                                'name' => ['type' => 'string', 'required' => true],
+                                'source' => ['type' => 'string', 'required' => true],
+                                'type' => ['type' => 'string', 'required' => false],
+                            ],
+                        ],
+                    ],
+                    'verification' => [
+                        'type' => 'object',
+                        'required' => false,
+                        'children' => [
+                            'algorithm' => ['type' => 'string', 'required' => false],
+                        ],
+                    ],
+                    'retention' => [
+                        'type' => 'object',
+                        'required' => false,
+                        'children' => [
+                            'max_count' => ['type' => 'integer', 'required' => false],
+                        ],
+                    ],
                 ],
             ],
         ],

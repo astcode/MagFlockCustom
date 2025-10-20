@@ -22,6 +22,11 @@ return [
     'magdb.failover.detected' => ['previous', 'reason', 'target'],
     'magdb.failover.completed' => ['new_primary', 'reason'],
     'magdb.failover.failed' => ['reason', 'target'],
+    'magdb.failover.validation_passed' => ['new_primary'],
+    'magdb.failover.validation_failed' => ['new_primary', 'error'],
+    'magdb.backup.completed' => ['id'],
+    'magdb.backup.verify_completed' => ['id', 'success'],
+    'magdb.restore.completed' => ['id'],
 
     'config.reloaded' => ['version', 'changed_keys'],
     'config.reload_failed' => ['error'],

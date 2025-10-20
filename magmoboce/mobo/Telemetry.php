@@ -79,7 +79,19 @@ final class Telemetry
         );
         $this->defineCounter('magdb.health_failures_total', 'MagDB health check failures.', ['name']);
         $this->defineGauge('magdb.replica_health', 'MagDB replica health (1 healthy, 0 unhealthy).', ['name']);
+        $this->defineGauge('magdb.replica_lag_seconds', 'MagDB replication lag in seconds as observed during heartbeat.', ['name']);
+        $this->defineGauge('magdb.replica_latency_ms', 'MagDB heartbeat latency in milliseconds.', ['name']);
+        $this->defineHistogram(
+            'magdb.replica_latency_ms_histogram',
+            'Distribution of MagDB heartbeat latency in milliseconds.',
+            ['name'],
+            $this->databaseBuckets()
+        );
         $this->defineCounter('magdb.failovers_total', 'MagDB failover promotions grouped by reason.', ['reason']);
+        $this->defineCounter('magdb.backups_total', 'MagDB backups executed.', []);
+        $this->defineGauge('magdb.last_backup_epoch', 'Unix timestamp of the last successful MagDB backup.', []);
+        $this->defineCounter('magdb.restores_total', 'MagDB restore operations executed.', []);
+        $this->defineGauge('magdb.last_restore_epoch', 'Unix timestamp of the last MagDB restore.', []);
         $this->defineCounter(
             'config.reload_attempts_total',
             'Configuration reload attempts partitioned by result.',
@@ -184,7 +196,7 @@ final class Telemetry
         if (!isset($histogram['values'][$key])) {
             $bucketInitial = [];
             foreach ($histogram['buckets'] as $bucket) {
-                $bucketInitial[$bucket] = 0.0;
+                $bucketInitial[$this->bucketKey($bucket)] = 0.0;
             }
 
             $histogram['values'][$key] = [
@@ -199,7 +211,7 @@ final class Telemetry
 
         foreach ($histogram['buckets'] as $bucket) {
             if ($value <= $bucket) {
-                $sample['buckets'][$bucket] += 1.0;
+                $sample['buckets'][$this->bucketKey($bucket)] += 1.0;
             }
         }
 
@@ -281,7 +293,8 @@ final class Telemetry
                 $labelsBase = $sample['labels'];
 
                 foreach ($meta['buckets'] as $bucket) {
-                    $value = $sample['buckets'][$bucket] ?? 0.0;
+                    $bucketKey = $this->bucketKey($bucket);
+                    $value = $sample['buckets'][$bucketKey] ?? 0.0;
                     $bucketLabel = $bucket === INF ? '+Inf' : $this->formatFloat($bucket);
                     $labels = $this->formatLabels($labelsBase + ['le' => $bucketLabel]);
                     $lines[] = sprintf('%s_bucket%s %s', $promName, $labels, $this->formatFloat($value));
@@ -437,6 +450,19 @@ final class Telemetry
         }
 
         return sprintf('%.6e', $value);
+    }
+
+    private function bucketKey(float $bucket): string
+    {
+        if ($bucket === INF) {
+            return '+inf';
+        }
+
+        if ($bucket === -INF) {
+            return '-inf';
+        }
+
+        return rtrim(rtrim(sprintf('%.12F', $bucket), '0'), '.');
     }
 
     /**

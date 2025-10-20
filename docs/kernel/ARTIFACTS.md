@@ -1,4 +1,4 @@
-# Kernel & MagDS Artifact Map
+﻿# Kernel & MagDS Artifact Map
 
 Use this map to locate configuration layers, docs, runbooks, and data artifacts. Paths are relative to the repository root.
 
@@ -37,13 +37,14 @@ magmoboce/docs/
     Runbook_AuditLogging.md
     Runbook_IncidentResponse.md
     Runbook_Failover.md
+    Runbook_BackupRestore.md
     Runbook_Migrations.md
     Alerts.md
 
 migrations/
   README.md
   magds/
-    (component PHP migrations – see README for format)
+    (component PHP migrations â€“ see README for format)
 
 CLI /
   mag (application dispatcher for `php mag ...` commands)

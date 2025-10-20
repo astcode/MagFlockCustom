@@ -5,7 +5,7 @@ Use this runbook to diagnose degraded primaries, promote replicas, and restore s
 ---
 
 ## 1. Detection & Triage
-- **Signals:** `magdb.failovers_total`, `magdb.replica_health`, kernel logs (`storage/logs/mobo.log`), and Alertmanager notifications.
+- **Signals:** `magdb.failovers_total`, `magdb.replica_health`, `magdb.replica_lag_seconds`, `magdb.replica_latency_ms`, kernel logs (`storage/logs/mobo.log`), and Alertmanager notifications.
 - **Immediate actions:**
   1. Inspect current topology  
      ```bash
@@ -13,9 +13,10 @@ Use this runbook to diagnose degraded primaries, promote replicas, and restore s
      ```
   2. Confirm telemetry  
      ```bash
-     php bin/metrics-dump.php | rg magdb_replica_health
+     php bin/metrics-dump.php | rg 'magdb_replica_(health|lag_seconds|latency_ms)'
      ```
-  3. Check Postgres health on each host (e.g., `psql` or monitoring dashboards).
+  3. Review the event stream for `magdb.failover.validation_*` notifications to confirm the latest promotion passed smoke tests.
+  4. Check Postgres health on each host (e.g., `psql` or monitoring dashboards).
 
 ---
 
@@ -45,8 +46,9 @@ After promotion, re-run `php mag magds:replica-status` and ensure the new primar
 ---
 
 ## 4. Fencing & Session Cleanup
-- Respect `magds.failover.fencing` settings (`grace_period_seconds`, `session_timeout_seconds`). During promotion the manager quarantines the failed primary; do not reintroduce it until root cause is resolved.
-- When reintegrating the former primary, update its status in the Postgres cluster, validate replication, then rerun `php mag magds:replica-status`.
+- Respect `magds.failover.fencing` settings (`grace_period_seconds`, `session_timeout_seconds`). During promotion the manager quarantines and fences the failed primary, draining active sessions (`pg_terminate_backend`) where possible.
+- `php mag magds:replica-status` reports `quarantined=yes` / `fenced=yes` when a node is under lockout; do not reintroduce it until root cause is resolved and quarantine clears.
+- When reintegrating the former primary, update its status in the Postgres cluster, validate replication (lag returns to zero and latency normalises), then rerun `php mag magds:replica-status`.
 
 ---
 
@@ -57,4 +59,5 @@ After promotion, re-run `php mag magds:replica-status` and ensure the new primar
    php mag migrate:status
    ```
 3. Capture a fresh backup (`php mag magds:backup run`) before returning the old primary to service.
-4. Conduct a postmortem, documenting root cause and remediation actions.
+4. Capture telemetry snapshots (`magdb_replica_lag_seconds`, `magdb_replica_latency_ms`) for incident records and ensure a `magdb.failover.validation_passed` event was emitted for the new primary.
+5. Conduct a postmortem, documenting root cause and remediation actions.

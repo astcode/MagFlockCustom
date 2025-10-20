@@ -33,6 +33,12 @@ return [
             'preferred_tags' => [
                 'region' => 'local',
             ],
+            'weights' => [
+                'lag_seconds' => 20.0,
+                'latency_ms' => 0.2,
+                'preferred_tag_bonus' => 25.0,
+                'fenced_penalty' => 100.0,
+            ],
         ],
         'fencing' => [
             'grace_period_seconds' => 30,
@@ -41,6 +47,23 @@ return [
         'health' => [
             'read_timeout_seconds' => 3,
             'write_timeout_seconds' => 6,
+        ],
+        'backup' => [
+            'enabled' => true,
+            'path' => 'storage/backups',
+            'datasets' => [
+                [
+                    'name' => 'kernel_state',
+                    'source' => 'storage/state/system.json',
+                    'type' => 'file',
+                ],
+            ],
+            'verification' => [
+                'algorithm' => 'sha256',
+            ],
+            'retention' => [
+                'max_count' => 5,
+            ],
         ],
     ],
 ];

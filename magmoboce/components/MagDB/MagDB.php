@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Components\MagDB;
 
+use Components\MagDB\Backup\MagDBBackupManager;
 use Components\MagDB\Failover\MagDBFailoverManager;
 use MoBo\Contracts\ComponentInterface;
 use MoBo\Kernel;
@@ -29,7 +30,14 @@ class MagDB implements ComponentInterface
     private array $connections = [];
 
     /**
-     * @var array<string, array{status:string,last_error:?string,lag:?float}>
+     * @var array<string, array{
+     *     status:string,
+     *     last_error:?string,
+     *     lag:?float,
+     *     latency_ms:?float,
+     *     fenced:bool,
+     *     last_heartbeat_at:?int
+     * }>
      */
     private array $connectionStatuses = [];
 
@@ -43,10 +51,11 @@ class MagDB implements ComponentInterface
      */
     private array $magdsConfig = [];
 
-    private ?Logger $logger = null;
-    private ?Telemetry $telemetry = null;
-    private ?StateManager $stateManager = null;
-    private ?MagDBFailoverManager $failoverManager = null;
+private ?Logger $logger = null;
+private ?Telemetry $telemetry = null;
+private ?StateManager $stateManager = null;
+private ?MagDBFailoverManager $failoverManager = null;
+private ?MagDBBackupManager $backupManager = null;
     private string $activeConnectionName = self::DEFAULT_CONNECTION;
 
     public function getName(): string
@@ -108,6 +117,16 @@ class MagDB implements ComponentInterface
             $this->stateManager
         );
         $this->failoverManager->initialize();
+
+        $this->backupManager = new MagDBBackupManager(
+            $this,
+            $this->magdsConfig,
+            $this->logger,
+            $this->telemetry,
+            $this->stateManager,
+            $kernel->getEventBus()
+        );
+        $this->backupManager->initialize();
     }
 
     public function stop(): void
@@ -127,11 +146,21 @@ class MagDB implements ComponentInterface
         $statusMap = [];
         foreach (array_keys($this->connectionConfigs) as $name) {
             $healthy = $this->testConnection($name);
-            $status = $this->connectionStatuses[$name] ?? ['status' => 'unknown', 'last_error' => null, 'lag' => null];
+            $status = $this->connectionStatuses[$name] ?? [
+                'status' => 'unknown',
+                'last_error' => null,
+                'lag' => null,
+                'latency_ms' => null,
+                'fenced' => false,
+                'last_heartbeat_at' => null,
+            ];
             $statusMap[$name] = [
                 'status' => $healthy ? 'healthy' : 'failed',
                 'last_error' => $status['last_error'],
                 'lag' => $status['lag'],
+                'latency_ms' => $status['latency_ms'],
+                'fenced' => $status['fenced'],
+                'last_heartbeat_at' => $status['last_heartbeat_at'],
             ];
         }
 
@@ -183,6 +212,11 @@ class MagDB implements ComponentInterface
     public function getFailoverManager(): ?MagDBFailoverManager
     {
         return $this->failoverManager;
+    }
+
+    public function getBackupManager(): ?MagDBBackupManager
+    {
+        return $this->backupManager;
     }
 
     public function getConnectionStatuses(): array
@@ -322,11 +356,21 @@ class MagDB implements ComponentInterface
 
     public function updateReplicaLag(string $name, ?float $lag): void
     {
-        $existing = $this->connectionStatuses[$name] ?? ['status' => 'unknown', 'last_error' => null, 'lag' => null];
+        $existing = $this->connectionStatuses[$name] ?? [
+            'status' => 'unknown',
+            'last_error' => null,
+            'lag' => null,
+            'latency_ms' => null,
+            'fenced' => false,
+            'last_heartbeat_at' => null,
+        ];
         $this->connectionStatuses[$name] = [
             'status' => $existing['status'],
             'last_error' => $existing['last_error'],
             'lag' => $lag,
+            'latency_ms' => $existing['latency_ms'],
+            'fenced' => $existing['fenced'],
+            'last_heartbeat_at' => $existing['last_heartbeat_at'],
         ];
 
         $this->telemetry?->setGauge(
@@ -352,8 +396,20 @@ class MagDB implements ComponentInterface
                 return false;
             }
 
-            $this->connections[$name]->query('SELECT 1')->fetch();
+            $pdo = $this->connections[$name];
+            $startedAt = microtime(true);
+
+            $statement = $pdo->query('SELECT 1');
+            if ($statement === false) {
+                throw new RuntimeException('Unable to perform health probe against MagDS connection.');
+            }
+
+            $statement->fetch();
+            $latencyMs = (microtime(true) - $startedAt) * 1000;
+
             $this->setStatus($name, 'healthy');
+            $this->updateReplicaLatency($name, $latencyMs);
+            $this->telemetry?->observeHistogram('magdb.replica_latency_ms_histogram', $latencyMs, ['name' => $name]);
             return true;
         } catch (\Throwable $exception) {
             $this->setStatus($name, 'failed', $exception->getMessage());
@@ -364,11 +420,19 @@ class MagDB implements ComponentInterface
 
     private function setStatus(string $name, string $status, ?string $error = null): void
     {
-        $existing = $this->connectionStatuses[$name] ?? ['lag' => null];
+        $existing = $this->connectionStatuses[$name] ?? [
+            'lag' => null,
+            'latency_ms' => null,
+            'fenced' => false,
+            'last_heartbeat_at' => null,
+        ];
         $this->connectionStatuses[$name] = [
             'status' => $status,
             'last_error' => $error,
             'lag' => $existing['lag'],
+            'latency_ms' => $existing['latency_ms'],
+            'fenced' => $existing['fenced'],
+            'last_heartbeat_at' => $existing['last_heartbeat_at'],
         ];
 
         $this->telemetry?->setGauge(
@@ -378,11 +442,80 @@ class MagDB implements ComponentInterface
         );
     }
 
+    public function updateReplicaLatency(string $name, ?float $latencyMs): void
+    {
+        $existing = $this->connectionStatuses[$name] ?? [
+            'status' => 'unknown',
+            'last_error' => null,
+            'lag' => null,
+            'latency_ms' => null,
+            'fenced' => false,
+            'last_heartbeat_at' => null,
+        ];
+
+        $this->connectionStatuses[$name] = [
+            'status' => $existing['status'],
+            'last_error' => $existing['last_error'],
+            'lag' => $existing['lag'],
+            'latency_ms' => $latencyMs,
+            'fenced' => $existing['fenced'],
+            'last_heartbeat_at' => $existing['last_heartbeat_at'],
+        ];
+
+        $this->telemetry?->setGauge(
+            'magdb.replica_latency_ms',
+            $latencyMs ?? 0.0,
+            ['name' => $name]
+        );
+    }
+
     private function refreshReplicaTelemetry(): void
     {
         if ($this->failoverManager !== null) {
             $this->failoverManager->heartbeat(autoPromote: false);
         }
+    }
+
+    public function markFenced(string $name, bool $fenced): void
+    {
+        $existing = $this->connectionStatuses[$name] ?? [
+            'status' => 'unknown',
+            'last_error' => null,
+            'lag' => null,
+            'latency_ms' => null,
+            'fenced' => false,
+            'last_heartbeat_at' => null,
+        ];
+
+        $this->connectionStatuses[$name] = [
+            'status' => $existing['status'],
+            'last_error' => $existing['last_error'],
+            'lag' => $existing['lag'],
+            'latency_ms' => $existing['latency_ms'],
+            'fenced' => $fenced,
+            'last_heartbeat_at' => $existing['last_heartbeat_at'],
+        ];
+    }
+
+    public function updateHeartbeatTimestamp(string $name, ?int $timestamp): void
+    {
+        $existing = $this->connectionStatuses[$name] ?? [
+            'status' => 'unknown',
+            'last_error' => null,
+            'lag' => null,
+            'latency_ms' => null,
+            'fenced' => false,
+            'last_heartbeat_at' => null,
+        ];
+
+        $this->connectionStatuses[$name] = [
+            'status' => $existing['status'],
+            'last_error' => $existing['last_error'],
+            'lag' => $existing['lag'],
+            'latency_ms' => $existing['latency_ms'],
+            'fenced' => $existing['fenced'],
+            'last_heartbeat_at' => $timestamp,
+        ];
     }
 }
 

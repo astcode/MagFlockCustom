@@ -1,4 +1,4 @@
-# Kernel & MagDS Contracts (v1)
+﻿# Kernel & MagDS Contracts (v1)
 
 Use this file as the machine-actionable reference for schemas, events, metrics, CLI output, and redaction rules. Keep entries short and copy-pasteable.
 
@@ -7,7 +7,7 @@ Use this file as the machine-actionable reference for schemas, events, metrics, 
 ## Configuration Schema (excerpt)
 
 ```php
-// docs/kernel/CONTRACTS.md – config schema v1
+// docs/kernel/CONTRACTS.md â€“ config schema v1
 return [
     'kernel' => [
         'name'        => ['type' => 'string', 'required' => true],
@@ -115,7 +115,7 @@ Rollback rule: on validation failure or downstream exception, revert to last kno
 
 ---
 
-## Events (name → required fields)
+## Events (name â†’ required fields)
 
 ```
 system.boot                { instance_id:string, environment:string }
@@ -137,26 +137,35 @@ health.check_complete      { system:object, components:object }
 config.reloaded            { version:string, changed_keys:string[] }
 config.reload_failed       { error:string }
 security.capability_denied { capability:string, actor:string, context:object }
+magdb.failover.validation_passed { new_primary:string }
+magdb.failover.validation_failed { new_primary:string, error:string }
 ```
 
 ---
 
-## Metrics (name • type • labels • description)
+## Metrics (name â€¢ type â€¢ labels â€¢ description)
 
 ```
-kernel.boot.time_ms              • gauge      • { }                 • Time spent booting kernel
-kernel.uptime.seconds            • counter    • { }                 • Total uptime in seconds
-eventbus.events_total            • counter    • { event }           • Count of emitted events
-eventbus.handler_duration_ms     • histogram  • { event }           • Handler execution time
-component.restarts_total         • counter    • { component }       • Lifecycle restarts
-component.state_changes_total    • counter    • { component,state } • State transitions
-magdb.connections.opened_total   • counter    • { name }            • PDO connections opened
-magdb.connections.closed_total   • counter    • { name }            • PDO connections closed
-magdb.health_latency_ms          • histogram  • { name }            • Health check latency
-magdb.health_failures_total      • counter    • { name }            • Health check failures
-magdb.replica_health             • gauge      • { name }            • Replica health (1 healthy, 0 unhealthy)
-magdb.failovers_total            • counter    • { reason }          • Failover promotions grouped by reason
-config.reload_attempts_total     • counter    • { result }          • Reload attempts labelled success|failure
+kernel.boot.time_ms              â€¢ gauge      â€¢ { }                 â€¢ Time spent booting kernel
+kernel.uptime.seconds            â€¢ counter    â€¢ { }                 â€¢ Total uptime in seconds
+eventbus.events_total            â€¢ counter    â€¢ { event }           â€¢ Count of emitted events
+eventbus.handler_duration_ms     â€¢ histogram  â€¢ { event }           â€¢ Handler execution time
+component.restarts_total         â€¢ counter    â€¢ { component }       â€¢ Lifecycle restarts
+component.state_changes_total    â€¢ counter    â€¢ { component,state } â€¢ State transitions
+magdb.connections.opened_total   â€¢ counter    â€¢ { name }            â€¢ PDO connections opened
+magdb.connections.closed_total   â€¢ counter    â€¢ { name }            â€¢ PDO connections closed
+magdb.health_latency_ms          â€¢ histogram  â€¢ { name }            â€¢ Health check latency
+magdb.health_failures_total      â€¢ counter    â€¢ { name }            â€¢ Health check failures
+magdb.replica_health             â€¢ gauge      â€¢ { name }            â€¢ Replica health (1 healthy, 0 unhealthy)
+magdb.replica_lag_seconds        • gauge      • { name }            • Replica lag seconds from heartbeat probes
+magdb.replica_latency_ms         • gauge      • { name }            • Latest heartbeat latency in ms
+magdb.replica_latency_ms_histogram • histogram  • { name }          • Distribution of heartbeat latency samples
+magdb.failovers_total            â€¢ counter    â€¢ { reason }          â€¢ Failover promotions grouped by reason
+magdb.backups_total            • counter    • { }                 • Completed backups
+magdb.last_backup_epoch        • gauge      • { }                 • Epoch timestamp of last successful backup
+magdb.restores_total           • counter    • { }                 • Completed restores
+magdb.last_restore_epoch       • gauge      • { }                 • Epoch timestamp of last restore
+config.reload_attempts_total     â€¢ counter    â€¢ { result }          â€¢ Reload attempts labelled success|failure
 ```
 
 > Exporter normalises metric identifiers to Prometheus-safe names by replacing `.` with `_` (example: `kernel.boot.time_ms` -> `kernel_boot_time_ms`).
@@ -190,6 +199,14 @@ Additional commands to align with Automation & Tooling checklist will follow the
 
 Command family: `php mag migrate:*`
 
+MagDS backup orchestration:
+```
+php mag magds:backup run [--label=<tag>]
+php mag magds:backup verify --id=<backup-id>
+php mag magds:backup list
+php mag magds:restore --id=<backup-id> [--dry-run]
+```
+
 ```
 php mag migrate:status [--component=magds] [--connection=magdsdb]
 php mag migrate:up [--component=magds] [--connection=magdsdb] [--target=<id>]
@@ -210,17 +227,25 @@ php mag magds:failover [--promote=<connection>] [--force]
 
 - `magds:replica-status` reports configured primary, current primary, and replica health.
 - `magds:failover` runs a heartbeat with auto promotion or forces promotion to a specific replica.
-- Failover events emit `magdb.failover.*` and update telemetry (`magdb.failovers_total`, `magdb.replica_health`).
+- Failover events emit `magdb.failover.*` and update telemetry (`magdb.failovers_total`, `magdb.replica_health`, `magdb.replica_lag_seconds`, `magdb.replica_latency_ms`).
+- Backup orchestration emits `magdb.backup.*` and `magdb.restore.*` events; monitor `magdb.backups_total` / `magdb.restores_total` for counts and `magdb.last_backup_epoch` for recency.
+magdb.backups_total            • counter    • { }                 • Completed backups
+magdb.last_backup_epoch        • gauge      • { }                 • Epoch timestamp of last successful backup
+magdb.restores_total           • counter    • { }                 • Completed restores
+magdb.last_restore_epoch       • gauge      • { }                 • Epoch timestamp of last restore
+magdb.replica_lag_seconds        • gauge      • { name }            • Replica lag seconds from heartbeat probes
+magdb.replica_latency_ms         • gauge      • { name }            • Latest heartbeat latency in ms
+magdb.replica_latency_ms_histogram • histogram  • { name }          • Distribution of heartbeat latency samples
 
 ---
 
 ## Chaos Scenario IDs (for resilience testing)
 
 ```
-db.down            → shut down primary DB; expected: kernel triggers failover/backoff, emits component.failed
-db.latency.500ms   → introduce 500ms latency; expected: health status degraded, alert fires if threshold exceeded
-component.crash    → force component->start() throw; expected: lifecycle recover within restart budget
-config.invalid     → push invalid config; expected: config.reload_failed, rollback, no crash
+db.down            â†’ shut down primary DB; expected: kernel triggers failover/backoff, emits component.failed
+db.latency.500ms   â†’ introduce 500ms latency; expected: health status degraded, alert fires if threshold exceeded
+component.crash    â†’ force component->start() throw; expected: lifecycle recover within restart budget
+config.invalid     â†’ push invalid config; expected: config.reload_failed, rollback, no crash
 ```
 
 Each scenario must emit an audit log entry and be recorded in test results.

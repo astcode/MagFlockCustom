@@ -31,6 +31,22 @@ final class MagDBFailoverManager
      */
     private array $quarantine = [];
 
+    /**
+     * @var array<string, float>
+     */
+    private array $replicaScores = [];
+
+    /**
+     * @var array<string, array{
+     *     healthy:bool,
+     *     lag:?float,
+     *     latency_ms:?float,
+     *     fenced:bool,
+     *     timestamp:int
+     * }>
+     */
+    private array $heartbeatCache = [];
+
     private ?string $lastFailover = null;
 
     public function __construct(
@@ -54,6 +70,7 @@ final class MagDBFailoverManager
 
         $this->replicaConfig = $this->mergeReplicaDefinitions($base, $this->dynamicReplicas);
         $this->clearExpiredQuarantine();
+        $this->hydrateHeartbeatState();
         $this->refreshReplicaStatuses();
     }
 
@@ -98,10 +115,14 @@ final class MagDBFailoverManager
             'healthy' => $configuredStatus['status'] === 'healthy',
             'last_error' => $configuredStatus['last_error'],
             'lag' => $configuredStatus['lag'],
+            'latency_ms' => $configuredStatus['latency_ms'] ?? null,
             'active' => $configuredPrimary === $active,
             'auto_promote' => false,
             'priority' => PHP_INT_MAX,
             'quarantined' => $this->isQuarantined($configuredPrimary),
+            'fenced' => $configuredStatus['fenced'] ?? false,
+            'last_heartbeat_at' => $configuredStatus['last_heartbeat_at'] ?? null,
+            'score' => $this->replicaScores[$configuredPrimary] ?? 0.0,
         ];
 
         if ($configuredPrimary !== $active) {
@@ -112,10 +133,14 @@ final class MagDBFailoverManager
                 'healthy' => $activeStatus['status'] === 'healthy',
                 'last_error' => $activeStatus['last_error'],
                 'lag' => $activeStatus['lag'],
+                'latency_ms' => $activeStatus['latency_ms'] ?? null,
                 'active' => true,
                 'auto_promote' => false,
                 'priority' => PHP_INT_MAX,
                 'quarantined' => $this->isQuarantined($active),
+                'fenced' => $activeStatus['fenced'] ?? false,
+                'last_heartbeat_at' => $activeStatus['last_heartbeat_at'] ?? null,
+                'score' => $this->replicaScores[$active] ?? 0.0,
             ];
         }
 
@@ -132,10 +157,14 @@ final class MagDBFailoverManager
                 'healthy' => $status['status'] === 'healthy',
                 'last_error' => $status['last_error'],
                 'lag' => $status['lag'],
+                'latency_ms' => $status['latency_ms'] ?? null,
                 'active' => $name === $active,
                 'auto_promote' => (bool) ($replica['auto_promote'] ?? false),
                 'priority' => (int) ($replica['priority'] ?? 0),
                 'quarantined' => $this->isQuarantined($name),
+                'fenced' => $status['fenced'] ?? false,
+                'last_heartbeat_at' => $status['last_heartbeat_at'] ?? null,
+                'score' => $this->replicaScores[$name] ?? 0.0,
             ];
         }
 
@@ -228,7 +257,7 @@ final class MagDBFailoverManager
             try {
                 $this->magdb->promote($name, $force || (bool) ($replica['auto_promote'] ?? false));
                 $this->lastFailover = gmdate('c');
-                $this->setQuarantine($previousPrimary);
+                $this->performFencing($previousPrimary);
                 $this->postFailoverValidation($name);
                 $this->telemetry?->incrementCounter('magdb.failovers_total', 1, ['reason' => $reason]);
                 $this->emitEvent('magdb.failover.completed', [
@@ -270,11 +299,28 @@ final class MagDBFailoverManager
             }
         }
 
+        $timestamp = time();
         foreach ($names as $name) {
             $healthy = $this->magdb->testConnection($name);
             $lag = $healthy ? $this->measureLag($name) : null;
             $this->magdb->updateReplicaLag($name, $lag);
+            $this->magdb->updateHeartbeatTimestamp($name, $timestamp);
+
+            $status = $this->magdb->getConnectionStatuses()[$name] ?? [
+                'latency_ms' => null,
+                'fenced' => $this->isQuarantined($name),
+            ];
+
+            $this->heartbeatCache[$name] = [
+                'healthy' => $healthy,
+                'lag' => $lag,
+                'latency_ms' => $status['latency_ms'] ?? null,
+                'fenced' => $status['fenced'] ?? false,
+                'timestamp' => $timestamp,
+            ];
         }
+
+        $this->persistState();
     }
 
     /**
@@ -300,36 +346,57 @@ final class MagDBFailoverManager
      * @param array<string, array{status:string,last_error:?string,lag:?float}> $healthMap
      * @param array<string, string> $preferredTags
      */
-    private function calculateScore(array $replica, array $healthMap, array $preferredTags): int
+    private function calculateScore(array $replica, array $healthMap, array $preferredTags): float
     {
         $name = (string) ($replica['connection'] ?? '');
-        $health = $healthMap[$name] ?? ['status' => 'unknown', 'lag' => null];
-        $score = (int) ($replica['priority'] ?? 0) + (int) ($replica['weight'] ?? 0);
+        $health = $healthMap[$name] ?? [
+            'status' => 'unknown',
+            'lag' => null,
+            'latency_ms' => null,
+            'fenced' => false,
+        ];
+        $score = (float) ($replica['priority'] ?? 0) + (float) ($replica['weight'] ?? 0);
 
         if ((bool) ($replica['auto_promote'] ?? false)) {
-            $score += 50;
+            $score += 50.0;
         }
 
         if ($health['status'] !== 'healthy') {
-            $score -= 1000;
+            $score -= 1000.0;
         }
 
         if ($this->isQuarantined($name)) {
-            $score -= 1000;
+            $score -= 1000.0;
         }
 
         $lagThreshold = (int) ($replica['lag_threshold_seconds'] ?? 0);
         if ($lagThreshold > 0 && isset($health['lag']) && $health['lag'] !== null && $health['lag'] > $lagThreshold) {
-            $score -= 500;
+            $score -= 500.0;
         }
 
         if (!empty($preferredTags) && isset($replica['tags']) && is_array($replica['tags'])) {
+            $tagBonus = (float) ($this->config['failover']['weights']['preferred_tag_bonus'] ?? 25.0);
             foreach ($preferredTags as $key => $value) {
                 if (($replica['tags'][$key] ?? null) === $value) {
-                    $score += 25;
+                    $score += $tagBonus;
                 }
             }
         }
+
+        $weights = $this->config['failover']['weights'] ?? [];
+        if (isset($health['lag']) && $health['lag'] !== null) {
+            $score -= (float) $health['lag'] * (float) ($weights['lag_seconds'] ?? 25.0);
+        }
+
+        if (isset($health['latency_ms']) && $health['latency_ms'] !== null) {
+            $score -= (float) $health['latency_ms'] * (float) ($weights['latency_ms'] ?? 0.25);
+        }
+
+        if (!empty($weights['fenced_penalty']) && ($health['fenced'] ?? false) === true) {
+            $score -= (float) $weights['fenced_penalty'];
+        }
+
+        $this->replicaScores[$name] = $score;
 
         return $score;
     }
@@ -375,6 +442,8 @@ final class MagDBFailoverManager
         }
 
         try {
+            $pdo->exec('SET statement_timeout = 5000;');
+
             $stmt = $pdo->query('SELECT pg_is_in_recovery() AS in_recovery');
             $row = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
             if ($row && ($row['in_recovery'] ?? 't') === 't') {
@@ -383,17 +452,33 @@ final class MagDBFailoverManager
                 ]);
             }
 
-            $probe = $pdo->query('SELECT current_timestamp');
+            $probe = $pdo->query('SELECT current_timestamp as ts, current_database() as db');
             if ($probe === false) {
-                $this->logger?->warning('Post-failover probe query failed.', 'MAGDB', [
-                    'connection' => $newPrimary,
-                ]);
+                throw new \RuntimeException('Unable to run timestamp probe on promoted primary.');
             }
+            $probe->fetch(PDO::FETCH_ASSOC);
+
+            $schemaCheck = $pdo->query("SELECT count(*) AS tables FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema')");
+            if ($schemaCheck === false) {
+                throw new \RuntimeException('Unable to enumerate tables during post-failover validation.');
+            }
+            $schemaCheck->fetch(PDO::FETCH_ASSOC);
 
             $this->magdb->updateReplicaLag($newPrimary, 0.0);
+            $this->magdb->updateHeartbeatTimestamp($newPrimary, time());
+            $this->emitEvent('magdb.failover.validation_passed', [
+                'new_primary' => $newPrimary,
+            ]);
+            $this->logger?->info('Post-failover smoke tests passed.', 'MAGDB', [
+                'connection' => $newPrimary,
+            ]);
         } catch (\Throwable $exception) {
             $this->logger?->warning('Post-failover validation encountered errors.', 'MAGDB', [
                 'connection' => $newPrimary,
+                'error' => $exception->getMessage(),
+            ]);
+            $this->emitEvent('magdb.failover.validation_failed', [
+                'new_primary' => $newPrimary,
                 'error' => $exception->getMessage(),
             ]);
         }
@@ -437,6 +522,7 @@ final class MagDBFailoverManager
         $this->dynamicReplicas = array_values($state['replicas'] ?? []);
         $this->quarantine = $state['quarantine'] ?? [];
         $this->lastFailover = $state['last_failover'] ?? null;
+        $this->heartbeatCache = $state['heartbeats'] ?? [];
     }
 
     private function persistState(): void
@@ -449,6 +535,7 @@ final class MagDBFailoverManager
             'replicas' => $this->dynamicReplicas,
             'quarantine' => $this->quarantine,
             'last_failover' => $this->lastFailover,
+            'heartbeats' => $this->heartbeatCache,
         ]);
     }
 
@@ -463,6 +550,7 @@ final class MagDBFailoverManager
         foreach ($this->quarantine as $connection => $timestamp) {
             if ($timestamp <= $now) {
                 unset($this->quarantine[$connection]);
+                $this->magdb->markFenced($connection, false);
                 $updated = true;
             }
         }
@@ -477,15 +565,91 @@ final class MagDBFailoverManager
         return isset($this->quarantine[$connection]) && $this->quarantine[$connection] > time();
     }
 
-    private function setQuarantine(string $connection): void
+    private function setQuarantine(string $connection, ?int $secondsOverride = null): void
     {
-        $seconds = (int) ($this->config['failover']['quarantine_seconds'] ?? 60);
+        $seconds = $secondsOverride ?? (int) ($this->config['failover']['quarantine_seconds'] ?? 60);
         if ($seconds <= 0) {
             return;
         }
 
         $this->quarantine[$connection] = time() + $seconds;
+        $this->magdb->markFenced($connection, true);
         $this->persistState();
+    }
+
+    private function performFencing(string $previousPrimary): void
+    {
+        if ($previousPrimary === '') {
+            return;
+        }
+
+        $fencingConfig = $this->config['fencing'] ?? [];
+        $graceSeconds = isset($fencingConfig['grace_period_seconds'])
+            ? (int) $fencingConfig['grace_period_seconds']
+            : null;
+        $this->setQuarantine($previousPrimary, $graceSeconds);
+
+        $sessionTimeout = (int) ($fencingConfig['session_timeout_seconds'] ?? 0);
+        if ($sessionTimeout <= 0) {
+            return;
+        }
+
+        $pdo = $this->magdb->connection($previousPrimary);
+        if (!$pdo instanceof PDO) {
+            $this->logger?->debug('Unable to contact previous primary for fencing; connection unavailable.', 'MAGDB', [
+                'connection' => $previousPrimary,
+            ]);
+            return;
+        }
+
+        try {
+            $pdo->exec(sprintf('SET statement_timeout = %d;', max($sessionTimeout * 1000, 1000)));
+            $terminated = $pdo->query("
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND pid <> pg_backend_pid();
+            ");
+            $count = 0;
+            if ($terminated !== false) {
+                while ($terminated->fetch()) {
+                    $count++;
+                }
+            }
+
+            $this->logger?->warning('Fenced previous primary and drained existing sessions.', 'MAGDB', [
+                'connection' => $previousPrimary,
+                'terminated_sessions' => $count,
+                'timeout_seconds' => $sessionTimeout,
+            ]);
+        } catch (\Throwable $exception) {
+            $this->logger?->warning('Fencing reminder: unable to terminate sessions on previous primary.', 'MAGDB', [
+                'connection' => $previousPrimary,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function hydrateHeartbeatState(): void
+    {
+        if ($this->heartbeatCache === []) {
+            return;
+        }
+
+        foreach ($this->heartbeatCache as $connection => $snapshot) {
+            if (isset($snapshot['lag'])) {
+                $this->magdb->updateReplicaLag($connection, $snapshot['lag']);
+            }
+            if (isset($snapshot['latency_ms'])) {
+                $this->magdb->updateReplicaLatency($connection, $snapshot['latency_ms']);
+            }
+            if (isset($snapshot['timestamp'])) {
+                $this->magdb->updateHeartbeatTimestamp($connection, (int) $snapshot['timestamp']);
+            }
+            if (isset($snapshot['fenced'])) {
+                $this->magdb->markFenced($connection, (bool) $snapshot['fenced']);
+            }
+        }
     }
 
     private function emitEvent(string $name, array $payload): void
